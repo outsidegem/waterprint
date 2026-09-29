@@ -1,0 +1,74 @@
+{
+  "project": "WaterPrint",
+  "gate": "02",
+  "auditDate": "2026-09-29T16:24:00Z",
+  "status": "PASS_WITH_LIMITATIONS",
+  "baseline": {
+    "npm_ci": "PASS",
+    "npm_test": "FAIL",
+    "npm_run_typecheck": "FAIL",
+    "npm_run_build": "FAIL",
+    "npm_run_security": "PASS",
+    "npm_run_check": "FAIL"
+  },
+  "tests": {
+    "total": 17,
+    "passed": 17,
+    "failed": 0
+  },
+  "securityFindings": [
+    {
+      "id": "WP-01",
+      "severity": "HIGH",
+      "description": "Missing runtime validation allowed infinite or negative numbers into resource calculations",
+      "status": "FIXED"
+    },
+    {
+      "id": "WP-02",
+      "severity": "CRITICAL",
+      "description": "createEvent simply spread the input object, allowing arbitrary properties (including raw prompts) into the event model",
+      "status": "FIXED"
+    },
+    {
+      "id": "WP-03",
+      "severity": "HIGH",
+      "description": "Event hashes did not guarantee ordering or type determinism",
+      "status": "FIXED"
+    }
+  ],
+  "accountingIntegrity": {
+    "estimatorValidation": "VERIFIED",
+    "methodologyVersioning": "VERIFIED",
+    "eventIdentity": "VERIFIED",
+    "duplicateHandling": "VERIFIED",
+    "aggregation": "VERIFIED"
+  },
+  "privacy": {
+    "promptContentStorage": "PREVENTED",
+    "telemetryLeakage": "PREVENTED"
+  },
+  "determinism": {
+    "sameInputSameEstimate": "VERIFIED",
+    "sameEventSameIdentity": "VERIFIED"
+  },
+  "dependencies": {
+    "count": 0,
+    "devDependencies": 2,
+    "vulnerabilities": 0
+  },
+  "coverage": {
+    "status": "NOT MEASURED"
+  },
+  "knownLimitations": [
+    "provider telemetry unavailable",
+    "energy/water values remain estimates",
+    "browser extension not implemented",
+    "provider adapters not implemented",
+    "WRC functionality not implemented"
+  ],
+  "residualRisk": [
+    "JavaScript runtime floating-point variations across extreme environments could theoretically alter toFixed(6) truncation",
+    "The local ledger runs in memory. A sophisticated attacker with DOM/process control can easily bypass local assertions"
+  ],
+  "releaseDecision": "PASS WITH DOCUMENTED LIMITATIONS"
+}

@@ -1,0 +1,20 @@
+{
+  "name": "waterprint",
+  "version": "0.1.0",
+  "private": false,
+  "description": "Privacy-first, provider-neutral AI resource estimation core.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test dist/tests/*.test.js",
+    "typecheck": "node ./node_modules/typescript/bin/tsc --noEmit",
+    "build": "node ./node_modules/typescript/bin/tsc",
+    "security": "npm audit --audit-level=high",
+    "check": "npm run typecheck && npm run build && npm test"
+  },
+  "engines": { "node": ">=20" },
+  "devDependencies": {
+    "@types/node": "22.5.4",
+    "typescript": "5.7.2"
+  },
+  "license": "Apache-2.0"
+}
