@@ -3,7 +3,6 @@
   "name": "WaterPrint V1 Prototype HUD",
   "version": "0.1",
   "description": "Privacy-preserving resource-awareness layer for AI interactions.",
-  "permissions": ["activeTab", "scripting"],
   "content_scripts": [
     {
       "matches": ["*://chatgpt.com/*", "*://gemini.google.com/*"],

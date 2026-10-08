@@ -1,6 +1,7 @@
 (function() {
     'use strict';
 
+    // 1. Core Methodology parameters
     const Estimator = {
         methodologies: {
             'chatgpt': { energyBase: 0.34, waterBase: 0.32 },
@@ -8,48 +9,314 @@
         },
         calculate: function(provider, charCount) {
             const params = this.methodologies[provider] || this.methodologies['chatgpt'];
-            const workloadMultiplier = 1 + (charCount / 1000) * 0.1; 
+            const tokenEst = Math.max(1, Math.ceil(charCount / 4));
+            const workloadMultiplier = 1 + (tokenEst / 100) * 0.15;
             return {
-                energy: (params.energyBase * workloadMultiplier).toFixed(2),
-                water: (params.waterBase * workloadMultiplier).toFixed(2),
-                type: 'estimated' 
+                tokens: tokenEst,
+                energyWh: params.energyBase * workloadMultiplier,
+                waterMl: params.waterBase * workloadMultiplier
             };
+        },
+        optimize: function(rawText) {
+            return rawText
+                .replace(/\b(As an AI( language model)?|Certainly!?|I'?d be happy to help|Sure thing!?|Here is the( information)?)\b/gi, '')
+                .replace(/\b(please\s+(can\s+you\s+)?(kindly\s+)?|can\s+you\s+(please\s+)?|thank\s+you(\s+so\s+much)?(\s+in\s+advance)?|you\s+see\s+what\s+i\s+mean\??)\b/gi, '')
+                .replace(/\b(it is (important|crucial) to note that|as a matter of fact|at the end of the day|due to the fact that|needless to say|for the purpose of|in order to)\b/gi, '')
+                .replace(/\b(very|really|basically|essentially|literally|totally|definitely|actually|just|simply)\b/gi, '')
+                .replace(/([.?!])\1+/g, '$1')
+                .replace(/\s{2,}/g, ' ')
+                .trim();
         }
     };
 
+    // 2. Local Ledger
+    const Ledger = {
+        totalAvoidedMWh: 0,
+        totalAvoidedUml: 0,
+        lastAvoidedMWh: 0,
+        lastAvoidedUml: 0,
+        load: function() {
+            try {
+                const saved = localStorage.getItem('waterprint_ledger');
+                if (saved) {
+                    const data = JSON.parse(saved);
+                    this.totalAvoidedMWh = data.mwh || 0;
+                    this.totalAvoidedUml = data.uml || 0;
+                }
+            } catch (e) {}
+        },
+        save: function() {
+            localStorage.setItem('waterprint_ledger', JSON.stringify({
+                mwh: this.totalAvoidedMWh,
+                uml: this.totalAvoidedUml
+            }));
+        },
+        addSavings: function(mwh, uml) {
+            this.lastAvoidedMWh = mwh;
+            this.lastAvoidedUml = uml;
+            this.totalAvoidedMWh += mwh;
+            this.totalAvoidedUml += uml;
+            this.save();
+        }
+    };
+
+    async function sha256(message) {
+        const msgBuffer = new TextEncoder().encode(message);
+        const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+        return '0x' + Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+
+    // 3. User Interface & Touch Drag Logic
     const UI = {
         hud: null,
-        inject: function() {
+        attestModal: null,
+        infoModal: null,
+        provider: 'chatgpt',
+        currentDraftEnergy: 0.0,
+        currentDraftWater: 0.0,
+        autoMode: false,
+        
+        dragState: { active: false, initialX: 0, initialY: 0, xOffset: 0, yOffset: 0 },
+
+        inject: function(provider) {
             if (document.getElementById('waterprint-hud')) return;
+            this.provider = provider;
+            Ledger.load();
+            this.autoMode = localStorage.getItem('waterprint_automode') === 'true';
+
             this.hud = document.createElement('div');
             this.hud.id = 'waterprint-hud';
-            this.hud.style.cssText = 'position:fixed;bottom:24px;right:24px;background:#1a1a1a;color:#fff;padding:12px 16px;border-radius:8px;font-family:monospace;font-size:13px;z-index:999999;box-shadow:0 4px 12px rgba(0,0,0,0.5);border:1px solid #333;pointer-events:auto;';
+            this.hud.style.cssText = 'position:fixed;bottom:24px;right:24px;background:#161b22;color:#c9d1d9;padding:12px;border-radius:8px;font-family:monospace;font-size:12px;z-index:999999;box-shadow:0 8px 24px rgba(0,0,0,0.8);border:1px solid #30363d;display:flex;flex-direction:column;gap:8px;user-select:none;-webkit-user-select:none;touch-action:none;transform:translate3d(0px,0px,0px);width:max-content;';
             document.body.appendChild(this.hud);
-            this.update('0.00', '0.00');
+
+            this.attestModal = document.createElement('div');
+            this.attestModal.style.cssText = 'position:fixed;bottom:70px;right:24px;background:#0d1117;color:#c9d1d9;padding:16px;border-radius:8px;font-family:-apple-system,sans-serif;font-size:12px;z-index:999999;box-shadow:0 8px 32px rgba(0,0,0,0.8);border:1px solid #30363d;width:320px;display:none;';
+            document.body.appendChild(this.attestModal);
+
+            this.infoModal = document.createElement('div');
+            this.infoModal.style.cssText = 'position:fixed;bottom:70px;right:24px;background:#0d1117;color:#c9d1d9;padding:16px;border-radius:8px;font-family:-apple-system,sans-serif;font-size:12px;z-index:999999;box-shadow:0 8px 32px rgba(0,0,0,0.8);border:1px solid #30363d;width:310px;display:none;line-height:1.4;';
+            this.infoModal.innerHTML = `<div style="font-weight:bold;color:#58a6ff;margin-bottom:6px;display:flex;justify-content:space-between;"><span>💧 Methodology</span><span class="wp-close" style="cursor:pointer;color:#8b949e;">✕</span></div><p style="margin-bottom:8px;font-size:11px;">Model Baselines derived from 2025 disclosures (~0.34 Wh / 0.32 mL for OpenAI; ~0.24 Wh / 0.26 mL for Google). Estimates represent workload approximations.</p>`;
+            document.body.appendChild(this.infoModal);
+
+            this.render();
+            this.initInteractions();
         },
-        update: function(wh, ml) {
-            this.hud.innerHTML = `💧 WaterPrint ⚡ ${wh} Wh   💧 ${ml} mL <span style="color:#aaa">estimated · medium confidence</span> <a href="#" style="color:#00ffcc;margin-left:8px;text-decoration:none">[ⓘ Info]</a> <a href="#" style="color:#ffcc00;margin-left:4px;text-decoration:none">[⚡ Optimize]</a>`;
+
+        initInteractions: function() {
+            this.hud.addEventListener('click', async (e) => {
+                const target = e.target.closest('.wp-btn');
+                if (!target) return;
+                e.preventDefault();
+                e.stopPropagation();
+                
+                if (target.id === 'wp-btn-opt') Adapters.runOptimization(false);
+                else if (target.id === 'wp-btn-info') this.toggleModal(this.infoModal);
+                else if (target.id === 'wp-btn-attest') await this.showAttestation();
+                else if (target.id === 'wp-btn-auto') {
+                    this.autoMode = !this.autoMode;
+                    localStorage.setItem('waterprint_automode', this.autoMode);
+                    this.render();
+                }
+            });
+
+            document.querySelectorAll('.wp-close').forEach(el => el.addEventListener('click', () => {
+                this.infoModal.style.display = 'none';
+                this.attestModal.style.display = 'none';
+            }));
+
+            const dragItem = this.hud;
+            const startDrag = (e) => {
+                if (e.target.id !== 'wp-drag-handle') return;
+                this.dragState.active = true;
+                let clientX = e.type.includes('touch') ? e.touches[0].clientX : e.clientX;
+                let clientY = e.type.includes('touch') ? e.touches[0].clientY : e.clientY;
+                this.dragState.initialX = clientX - this.dragState.xOffset;
+                this.dragState.initialY = clientY - this.dragState.yOffset;
+                dragItem.style.boxShadow = '0 12px 32px rgba(0,0,0,0.9)';
+            };
+
+            const doDrag = (e) => {
+                if (!this.dragState.active) return;
+                e.preventDefault();
+                let clientX = e.type.includes('touch') ? e.touches[0].clientX : e.clientX;
+                let clientY = e.type.includes('touch') ? e.touches[0].clientY : e.clientY;
+                this.dragState.xOffset = clientX - this.dragState.initialX;
+                this.dragState.yOffset = clientY - this.dragState.initialY;
+                dragItem.style.transform = `translate3d(${this.dragState.xOffset}px, ${this.dragState.yOffset}px, 0)`;
+            };
+
+            const endDrag = () => {
+                this.dragState.active = false;
+                dragItem.style.boxShadow = '0 8px 24px rgba(0,0,0,0.8)';
+            };
+
+            dragItem.addEventListener('touchstart', startDrag, { passive: false });
+            document.addEventListener('touchmove', doDrag, { passive: false });
+            document.addEventListener('touchend', endDrag);
+            document.addEventListener('touchcancel', endDrag);
+
+            dragItem.addEventListener('mousedown', startDrag);
+            document.addEventListener('mousemove', doDrag);
+            document.addEventListener('mouseup', endDrag);
+        },
+
+        toggleModal: function(modal) {
+            this.infoModal.style.display = 'none';
+            this.attestModal.style.display = 'none';
+            modal.style.display = 'block';
+        },
+
+        showAttestation: async function() {
+            if (this.attestModal.style.display === 'block') {
+                this.attestModal.style.display = 'none';
+                return;
+            }
+            this.infoModal.style.display = 'none';
+
+            const timestamp = Math.floor(Date.now() / 1000);
+            const canonicalString = `node=0x1111|mwh=${Ledger.lastAvoidedMWh}|uml=${Ledger.lastAvoidedUml}|v=1|ts=${timestamp}`;
+            const hash = await sha256(canonicalString);
+            
+            this.attestModal.innerHTML = `
+                <div style="font-weight:bold;color:#58a6ff;margin-bottom:8px;display:flex;justify-content:space-between;">
+                    <span>📜 Attestation Payload</span>
+                    <span class="wp-close" style="cursor:pointer;color:#8b949e;font-size:14px;">✕</span>
+                </div>
+                <div style="background:#161b22;padding:10px;border-radius:4px;border:1px solid #30363d;margin-bottom:10px;font-family:monospace;font-size:11px;word-break:break-all;">
+                    <strong>Hash:</strong><br><span style="color:#39d353;">${hash}</span><br><br>
+                    <strong>Energy Avoided:</strong> ${Ledger.lastAvoidedMWh} mWh<br>
+                    <strong>Water Avoided:</strong> ${Ledger.lastAvoidedUml} µL
+                </div>
+                <div id="wp-btn-copy" style="background:#21262d;border:1px solid #30363d;color:#c9d1d9;padding:8px;border-radius:4px;cursor:pointer;text-align:center;font-weight:bold;">Copy JSON</div>
+            `;
+            this.attestModal.style.display = 'block';
+
+            this.attestModal.querySelector('.wp-close').addEventListener('click', () => {
+                this.attestModal.style.display = 'none';
+            });
+
+            document.getElementById('wp-btn-copy').addEventListener('click', (e) => {
+                e.stopPropagation();
+                navigator.clipboard.writeText(JSON.stringify({
+                    canonicalHash: hash,
+                    energyAvoidedMWh: Ledger.lastAvoidedMWh,
+                    waterAvoidedUml: Ledger.lastAvoidedUml,
+                    timestamp: timestamp,
+                    accountingType: "estimated_avoided"
+                }, null, 2));
+                e.target.innerText = '✔ Copied!';
+            });
+        },
+
+        render: function(savingsMsg = null) {
+            const liveWh = this.currentDraftEnergy.toFixed(4);
+            const liveMl = this.currentDraftWater.toFixed(4);
+            const totalWh = (Ledger.totalAvoidedMWh / 1000).toFixed(4);
+            const totalMl = (Ledger.totalAvoidedUml / 1000).toFixed(4);
+            
+            const autoColor = this.autoMode ? '#238636' : '#21262d';
+            const autoBorder = this.autoMode ? '#2ea043' : '#30363d';
+
+            this.hud.innerHTML = `
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <span style="font-weight:bold;color:#fff;">💧 WaterPrint</span>
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <button class="wp-btn" id="wp-btn-auto" style="background:${autoColor};border:1px solid ${autoBorder};color:#fff;padding:2px 6px;border-radius:4px;cursor:pointer;font-family:inherit;font-size:10px;font-weight:bold;">🤖 Auto: ${this.autoMode ? 'ON' : 'OFF'}</button>
+                        <span id="wp-drag-handle" style="cursor:grab;font-size:16px;color:#8b949e;padding:0 4px;" title="Drag to move">⋮</span>
+                    </div>
+                </div>
+                <div style="display:grid; grid-template-columns:40px 1fr; gap:4px; font-size:11px;">
+                    <span style="color:#8b949e;">Draft</span>
+                    <span style="color:#58a6ff;">${liveWh} Wh - ${liveMl} mL</span>
+                    <span style="color:#8b949e;">Total</span>
+                    <span style="color:#ff7b72;">${totalWh} Wh - ${totalMl} mL</span>
+                </div>
+                <div style="display:flex; gap:8px; align-items:center; margin-top:2px;">
+                    <button class="wp-btn" id="wp-btn-opt" style="background:#21262d;border:1px solid #30363d;color:#f0883e;padding:5px 10px;border-radius:4px;cursor:pointer;font-family:inherit;font-size:11px;font-weight:bold;">⚡ Optimize</button>
+                    <button class="wp-btn" id="wp-btn-attest" style="background:#238636;border:1px solid #2ea043;color:#fff;padding:5px 10px;border-radius:4px;cursor:pointer;font-family:inherit;font-size:11px;font-weight:bold;">📜 Attest</button>
+                    <button class="wp-btn" id="wp-btn-info" style="background:transparent;border:none;color:#8b949e;cursor:pointer;font-size:15px;padding:0;border-radius:50%;" title="Info">ⓘ</button>
+                </div>
+            `;
         }
     };
 
     const Adapters = {
-        init: function() {
-            const provider = window.location.hostname.includes('gemini') ? 'gemini' : 'chatgpt';
+        provider: 'chatgpt',
+
+        getInputElement: function() {
+            return document.querySelector('#prompt-textarea') || document.querySelector('.ql-editor') || document.querySelector('div[contenteditable="true"]');
+        },
+
+        getRawText: function() {
+            const input = this.getInputElement();
+            let text = '';
+            if (input) text = input.tagName === 'TEXTAREA' ? input.value : input.innerText;
+            return text.trim();
+        },
+
+        runOptimization: function(isSilentAuto) {
+            const input = this.getInputElement();
+            if (!input) return false;
+
+            const rawText = input.tagName === 'TEXTAREA' ? input.value : input.innerText;
+            if (!rawText || rawText.trim().length === 0) return false;
+
+            const optimizedText = Estimator.optimize(rawText);
+            if (rawText === optimizedText) return false;
             
-            document.addEventListener('input', (e) => {
-                const target = e.target;
-                const isChatGPT = target.tagName === 'TEXTAREA' && target.id === 'prompt-textarea';
-                const isGemini = target.hasAttribute('contenteditable') || target.classList.contains('ql-editor');
-                
-                if (isChatGPT || isGemini) {
-                    const textLength = target.value ? target.value.length : (target.innerText ? target.innerText.length : 0);
-                    const estimate = Estimator.calculate(provider, textLength);
-                    UI.update(estimate.energy, estimate.water);
+            const baseEst = Estimator.calculate(this.provider, rawText.length);
+            const optEst = Estimator.calculate(this.provider, optimizedText.length);
+
+            const avoidedMWh = Math.max(0, Math.round((baseEst.energyWh - optEst.energyWh) * 1000));
+            const avoidedUml = Math.max(0, Math.round((baseEst.waterMl - optEst.waterMl) * 1000));
+
+            if (avoidedMWh > 0 || avoidedUml > 0) {
+                Ledger.addSavings(avoidedMWh, avoidedUml);
+            }
+
+            if (input.tagName === 'TEXTAREA') input.value = optimizedText;
+            else input.innerText = optimizedText;
+            
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+
+            UI.currentDraftEnergy = optEst.energyWh;
+            UI.currentDraftWater = optEst.waterMl;
+            UI.render();
+            return true;
+        },
+
+        init: function() {
+            this.provider = window.location.hostname.includes('gemini') ? 'gemini' : 'chatgpt';
+            UI.inject(this.provider);
+
+            document.addEventListener('input', () => {
+                const text = this.getRawText();
+                if (!text) {
+                    UI.currentDraftEnergy = 0;
+                    UI.currentDraftWater = 0;
+                    UI.render();
+                    return;
+                }
+                const estimate = Estimator.calculate(this.provider, text.length);
+                UI.currentDraftEnergy = estimate.energyWh;
+                UI.currentDraftWater = estimate.waterMl;
+                UI.render();
+            }, true);
+
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && !e.shiftKey && UI.autoMode) {
+                    Adapters.runOptimization(true);
+                }
+            }, true);
+            
+            document.addEventListener('click', (e) => {
+                const sendBtn = e.target.closest('button[data-testid="send-button"], button[aria-label*="Send"], button[class*="send"]');
+                if (sendBtn && UI.autoMode) {
+                    Adapters.runOptimization(true);
                 }
             }, true);
         }
     };
 
-    UI.inject();
     Adapters.init();
 })();
