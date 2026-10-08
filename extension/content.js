@@ -31,25 +31,36 @@
 
     // 2. Local Ledger
     const Ledger = {
+        totalUsedWh: 0.0,
+        totalUsedMl: 0.0,
         totalAvoidedMWh: 0,
         totalAvoidedUml: 0,
         lastAvoidedMWh: 0,
         lastAvoidedUml: 0,
         load: function() {
             try {
-                const saved = localStorage.getItem('waterprint_ledger');
+                const saved = localStorage.getItem('waterprint_ledger_v6');
                 if (saved) {
                     const data = JSON.parse(saved);
+                    this.totalUsedWh = data.usedWh || 0;
+                    this.totalUsedMl = data.usedMl || 0;
                     this.totalAvoidedMWh = data.mwh || 0;
                     this.totalAvoidedUml = data.uml || 0;
                 }
             } catch (e) {}
         },
         save: function() {
-            localStorage.setItem('waterprint_ledger', JSON.stringify({
+            localStorage.setItem('waterprint_ledger_v6', JSON.stringify({
+                usedWh: this.totalUsedWh,
+                usedMl: this.totalUsedMl,
                 mwh: this.totalAvoidedMWh,
                 uml: this.totalAvoidedUml
             }));
+        },
+        addUsage: function(wh, ml) {
+            this.totalUsedWh += parseFloat(wh);
+            this.totalUsedMl += parseFloat(ml);
+            this.save();
         },
         addSavings: function(mwh, uml) {
             this.lastAvoidedMWh = mwh;
@@ -278,8 +289,8 @@
         render: function() {
             const liveWh = this.currentDraftEnergy.toFixed(4);
             const liveMl = this.currentDraftWater.toFixed(4);
-            const totalWh = (Ledger.totalAvoidedMWh / 1000).toFixed(4);
-            const totalMl = (Ledger.totalAvoidedUml / 1000).toFixed(4);
+            const totalUsedWh = Ledger.totalUsedWh.toFixed(4);
+            const totalUsedMl = Ledger.totalUsedMl.toFixed(4);
             
             const autoColor = this.autoMode ? '#238636' : '#21262d';
             const autoBorder = this.autoMode ? '#2ea043' : '#30363d';
@@ -296,7 +307,7 @@
                     <span style="color:#8b949e;">Draft</span>
                     <span style="color:#58a6ff;">${liveWh} Wh - ${liveMl} mL</span>
                     <span style="color:#8b949e;">Total</span>
-                    <span style="color:#ff7b72;">${totalWh} Wh - ${totalMl} mL</span>
+                    <span style="color:#ff7b72;">${totalUsedWh} Wh - ${totalUsedMl} mL</span>
                 </div>
                 <div style="display:flex; gap:8px; align-items:center; margin-top:2px;">
                     <button class="wp-btn" id="wp-btn-opt" style="background:#21262d;border:1px solid #30363d;color:#f0883e;padding:5px 10px;border-radius:4px;cursor:pointer;font-family:inherit;font-size:11px;font-weight:bold;">⚡ Optimize</button>
@@ -373,16 +384,27 @@
                 UI.render();
             }, true);
 
+            const commitOdometer = () => {
+                if (UI.currentDraftEnergy > 0 || UI.currentDraftWater > 0) {
+                    Ledger.addUsage(UI.currentDraftEnergy, UI.currentDraftWater);
+                    UI.currentDraftEnergy = 0;
+                    UI.currentDraftWater = 0;
+                    UI.render();
+                }
+            };
+
             document.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter' && !e.shiftKey && UI.autoMode) {
-                    Adapters.runOptimization(true);
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    if (UI.autoMode) Adapters.runOptimization(true);
+                    commitOdometer();
                 }
             }, true);
             
             document.addEventListener('click', (e) => {
                 const sendBtn = e.target.closest('button[data-testid="send-button"], button[aria-label*="Send"], button[class*="send"]');
-                if (sendBtn && UI.autoMode) {
-                    Adapters.runOptimization(true);
+                if (sendBtn) {
+                    if (UI.autoMode) Adapters.runOptimization(true);
+                    commitOdometer();
                 }
             }, true);
         }
