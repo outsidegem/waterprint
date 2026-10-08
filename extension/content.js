@@ -71,10 +71,15 @@
         hud: null,
         attestModal: null,
         infoModal: null,
+        reviewModal: null,
         provider: 'chatgpt',
         currentDraftEnergy: 0.0,
         currentDraftWater: 0.0,
         autoMode: false,
+        
+        pendingSavedMWh: 0,
+        pendingSavedUml: 0,
+        pendingOptimizedText: "",
         
         dragState: { active: false, initialX: 0, initialY: 0, xOffset: 0, yOffset: 0 },
 
@@ -98,6 +103,10 @@
             this.infoModal.innerHTML = `<div style="font-weight:bold;color:#58a6ff;margin-bottom:6px;display:flex;justify-content:space-between;"><span>💧 Methodology</span><span class="wp-close" style="cursor:pointer;color:#8b949e;">✕</span></div><p style="margin-bottom:8px;font-size:11px;">Model Baselines derived from 2025 disclosures (~0.34 Wh / 0.32 mL for OpenAI; ~0.24 Wh / 0.26 mL for Google). Estimates represent workload approximations.</p>`;
             document.body.appendChild(this.infoModal);
 
+            this.reviewModal = document.createElement('div');
+            this.reviewModal.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%, -50%);background:#0d1117;color:#c9d1d9;padding:20px;border-radius:12px;border:1px solid #30363d;box-shadow:0 12px 48px rgba(0,0,0,0.9);z-index:9999999;width:90vw;max-width:700px;display:none;font-family:-apple-system,sans-serif;max-height:85vh;overflow-y:auto;';
+            document.body.appendChild(this.reviewModal);
+
             this.render();
             this.initInteractions();
         },
@@ -116,6 +125,32 @@
                     this.autoMode = !this.autoMode;
                     localStorage.setItem('waterprint_automode', this.autoMode);
                     this.render();
+                }
+            });
+
+            this.reviewModal.addEventListener('click', (e) => {
+                const target = e.target.closest('.wp-btn');
+                if (!target) return;
+                e.preventDefault();
+                e.stopPropagation();
+
+                if (target.id === 'wp-btn-rev-cancel') {
+                    this.reviewModal.style.display = 'none';
+                } else if (target.id === 'wp-btn-rev-accept') {
+                    const input = Adapters.getInputElement();
+                    if (input) {
+                        if (input.tagName === 'TEXTAREA') input.value = this.pendingOptimizedText;
+                        else input.innerText = this.pendingOptimizedText;
+                        input.dispatchEvent(new Event('input', { bubbles: true }));
+                    }
+                    Ledger.addSavings(this.pendingSavedMWh, this.pendingSavedUml);
+                    
+                    const currentEst = Estimator.calculate(this.provider, this.pendingOptimizedText.length);
+                    this.currentDraftEnergy = currentEst.energyWh;
+                    this.currentDraftWater = currentEst.waterMl;
+                    this.render();
+                    
+                    this.reviewModal.style.display = 'none';
                 }
             });
 
@@ -163,7 +198,38 @@
         toggleModal: function(modal) {
             this.infoModal.style.display = 'none';
             this.attestModal.style.display = 'none';
+            this.reviewModal.style.display = 'none';
             modal.style.display = 'block';
+        },
+
+        showReview: function(baseEst, optEst, originalText, optimizedText, savedMWh, savedUml) {
+            this.pendingSavedMWh = savedMWh;
+            this.pendingSavedUml = savedUml;
+            this.pendingOptimizedText = optimizedText;
+            this.infoModal.style.display = 'none';
+            this.attestModal.style.display = 'none';
+
+            this.reviewModal.innerHTML = `
+                <div style="font-size:16px;font-weight:bold;color:#58a6ff;margin-bottom:12px;border-bottom:1px solid #30363d;padding-bottom:8px;">⚡ Optimization Review</div>
+                <div style="display:flex;gap:12px;flex-wrap:wrap;">
+                    <div style="flex:1;min-width:250px;background:#161b22;padding:12px;border-radius:6px;border:1px solid #30363d;">
+                        <div style="color:#8b949e;margin-bottom:6px;font-size:11px;font-weight:bold;">ORIGINAL (${baseEst.energyWh.toFixed(2)} Wh / ${baseEst.waterMl.toFixed(2)} mL)</div>
+                        <div style="font-family:monospace;font-size:11px;white-space:pre-wrap;color:#c9d1d9;">${originalText}</div>
+                    </div>
+                    <div style="flex:1;min-width:250px;background:#161b22;padding:12px;border-radius:6px;border:1px solid #2ea043;">
+                        <div style="color:#39d353;margin-bottom:6px;font-size:11px;font-weight:bold;">OPTIMIZED (${optEst.energyWh.toFixed(2)} Wh / ${optEst.waterMl.toFixed(2)} mL)</div>
+                        <div style="font-family:monospace;font-size:11px;white-space:pre-wrap;color:#fff;">${optimizedText}</div>
+                    </div>
+                </div>
+                <div style="margin-top:16px;text-align:center;font-size:14px;background:#1c2128;padding:10px;border-radius:6px;">
+                    Estimated Savings: <strong style="color:#39d353;">-${savedMWh} mWh</strong> | <strong style="color:#39d353;">-${savedUml} µL</strong>
+                </div>
+                <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:16px;">
+                    <button class="wp-btn" id="wp-btn-rev-cancel" style="background:#21262d;border:1px solid #30363d;color:#c9d1d9;padding:8px 16px;border-radius:6px;cursor:pointer;font-family:inherit;">Keep Original</button>
+                    <button class="wp-btn" id="wp-btn-rev-accept" style="background:#238636;border:1px solid #2ea043;color:#fff;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:bold;font-family:inherit;">✔ Use Suggestion</button>
+                </div>
+            `;
+            this.reviewModal.style.display = 'block';
         },
 
         showAttestation: async function() {
@@ -172,6 +238,7 @@
                 return;
             }
             this.infoModal.style.display = 'none';
+            this.reviewModal.style.display = 'none';
 
             const timestamp = Math.floor(Date.now() / 1000);
             const canonicalString = `node=0x1111|mwh=${Ledger.lastAvoidedMWh}|uml=${Ledger.lastAvoidedUml}|v=1|ts=${timestamp}`;
@@ -208,7 +275,7 @@
             });
         },
 
-        render: function(savingsMsg = null) {
+        render: function() {
             const liveWh = this.currentDraftEnergy.toFixed(4);
             const liveMl = this.currentDraftWater.toFixed(4);
             const totalWh = (Ledger.totalAvoidedMWh / 1000).toFixed(4);
@@ -270,19 +337,22 @@
             const avoidedMWh = Math.max(0, Math.round((baseEst.energyWh - optEst.energyWh) * 1000));
             const avoidedUml = Math.max(0, Math.round((baseEst.waterMl - optEst.waterMl) * 1000));
 
-            if (avoidedMWh > 0 || avoidedUml > 0) {
-                Ledger.addSavings(avoidedMWh, avoidedUml);
+            if (isSilentAuto) {
+                if (avoidedMWh > 0 || avoidedUml > 0) Ledger.addSavings(avoidedMWh, avoidedUml);
+                
+                if (input.tagName === 'TEXTAREA') input.value = optimizedText;
+                else input.innerText = optimizedText;
+                
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+
+                UI.currentDraftEnergy = optEst.energyWh;
+                UI.currentDraftWater = optEst.waterMl;
+                UI.render();
+                return true;
+            } else {
+                UI.showReview(baseEst, optEst, rawText, optimizedText, avoidedMWh, avoidedUml);
+                return true;
             }
-
-            if (input.tagName === 'TEXTAREA') input.value = optimizedText;
-            else input.innerText = optimizedText;
-            
-            input.dispatchEvent(new Event('input', { bubbles: true }));
-
-            UI.currentDraftEnergy = optEst.energyWh;
-            UI.currentDraftWater = optEst.waterMl;
-            UI.render();
-            return true;
         },
 
         init: function() {
