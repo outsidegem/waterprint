@@ -110,8 +110,19 @@
             document.body.appendChild(this.attestModal);
 
             this.infoModal = document.createElement('div');
-            this.infoModal.style.cssText = 'position:fixed;bottom:70px;right:24px;background:#0d1117;color:#c9d1d9;padding:16px;border-radius:8px;font-family:-apple-system,sans-serif;font-size:12px;z-index:999999;box-shadow:0 8px 32px rgba(0,0,0,0.8);border:1px solid #30363d;width:310px;display:none;line-height:1.4;';
-            this.infoModal.innerHTML = `<div style="font-weight:bold;color:#58a6ff;margin-bottom:6px;display:flex;justify-content:space-between;"><span>💧 Methodology</span><span class="wp-close" style="cursor:pointer;color:#8b949e;">✕</span></div><p style="margin-bottom:8px;font-size:11px;">Model Baselines derived from 2025 disclosures (~0.34 Wh / 0.32 mL for OpenAI; ~0.24 Wh / 0.26 mL for Google). Estimates represent workload approximations.</p>`;
+            this.infoModal.style.cssText = 'position:fixed;bottom:70px;right:24px;background:#0d1117;color:#c9d1d9;padding:20px;border-radius:12px;font-family:-apple-system,sans-serif;font-size:12px;z-index:999999;box-shadow:0 12px 48px rgba(0,0,0,0.9);border:1px solid #30363d;width:340px;display:none;line-height:1.5;';
+            this.infoModal.innerHTML = `
+                <div style="font-size:14px;font-weight:bold;color:#58a6ff;margin-bottom:12px;border-bottom:1px solid #30363d;padding-bottom:8px;display:flex;justify-content:space-between;align-items:center;">
+                    <span>💧 Methodology & Disclaimer</span>
+                    <span class="wp-close" style="cursor:pointer;color:#8b949e;font-size:16px;">✕</span>
+                </div>
+                <div style="color:#c9d1d9;">
+                    <p style="margin-bottom:10px;"><strong>IMPORTANT DISCLAIMER:</strong> WaterPrint values are workload estimates, not physical sensor measurements.</p>
+                    <p style="margin-bottom:10px;"><strong>2025 Baseline Assumptions:</strong><br>OpenAI: ~0.34 Wh / ~0.32 mL<br>Google: ~0.24 Wh / ~0.26 mL</p>
+                    <p style="margin-bottom:10px;color:#8b949e;font-size:11px;">Actual resource consumption varies based on factors including model architecture, hardware, datacenter efficiency, and geographic location.</p>
+                    <p style="margin-bottom:0;color:#39d353;font-size:11px;"><strong>Future Telemetry:</strong> Future versions could integrate direct telemetry or infrastructure-level measurements to replace these estimates with verified physical metrics.</p>
+                </div>
+            `;
             document.body.appendChild(this.infoModal);
 
             this.reviewModal = document.createElement('div');
